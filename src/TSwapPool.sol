@@ -110,9 +110,11 @@ contract TSwapPool is ERC20 {
     /// @param maximumPoolTokensToDeposit The maximum amount of pool tokens the user is willing to deposit, again it's
     /// derived from the amount of WETH the user is going to deposit
     /// @param deadline The deadline for the transaction to be completed by
+
+    // q if it's empty, how does it know the ratio?
     function deposit(
         uint256 wethToDeposit,
-        uint256 minimumLiquidityTokensToMint,
+        uint256 minimumLiquidityTokensToMint, //LP tokens we get back, if empty we can pick how many to mint
         uint256 maximumPoolTokensToDeposit,
         uint64 deadline
     )
@@ -277,6 +279,8 @@ contract TSwapPool is ERC20 {
         return numerator / denominator;
     }
 
+    // n - How much pool tokens do you need to input to maintain the ratio?
+    //      used in swaps, if I want to receive 10 WETH, how many tokens do I need to add to the pool?
     function getInputAmountBasedOnOutput(
         uint256 outputAmount,
         uint256 inputReserves,
@@ -332,6 +336,7 @@ contract TSwapPool is ERC20 {
      * @param outputToken ERC20 token to send to caller
      * @param outputAmount The exact amount of tokens to send to caller
      */
+    //@audit-info missing @param on deadline variable
     function swapExactOutput(
         IERC20 inputToken,
         IERC20 outputToken,
@@ -393,7 +398,9 @@ contract TSwapPool is ERC20 {
         ) {
             revert TSwapPool__InvalidToken();
         }
-
+        
+        //@audit - breaks protocol invariant K = XY
+        //@audit - fee on transfer tokens will also break K = XY
         swap_count++;
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
