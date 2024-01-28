@@ -64,7 +64,7 @@ The `PasswordStore::s_password` function is set to be an `external` function, ho
 
 ```javascript
     function setPassword(string memory newPassword) external {
-@>      // @audit - There are no access controls
+@>      // @report-written - There are no access controls
         s_password = newPassword;
         emit SetNetPassword();
     }

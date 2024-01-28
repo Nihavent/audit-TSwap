@@ -1,13 +1,3 @@
-
-### [S-#] 
-**Description**
-
-**Impact**
-
-**Proof of Concept** 
-
-**Recommended Mitigation**
-
 ## High
 
 ### [H-1] Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protocol to take too many tokens from user
@@ -162,6 +152,124 @@ PoC - todo
 ```
 
 
+### [H-3] `TSwapPool::sellPoolTokens` calls `TSwapPool::swapExactOutput` when it should call `TSwapPool::swapExactInput`. This causes the user to make an unintended swap.
+
+**Description** The `TSwapPool::sellPoolTokens` function allows users to sell a given amount of poolTokens. However the function misuses the input calling `TSwapPool::swapExactOutput` with the user's expect sell amount of poolTokens in the `outputAmount` argument. This calls a swap that the user did not intend.
+
+**Impact** A swap is called with amounts which may vary significantly from the requested sell (dependant on price).
+
+**Proof of Concept** 
+
+1. User wishes to sell 10 USDC (pool token)
+2. User makes call:
+
+```javascript
+    pool.sellPoolTokens(10);
+```
+3. This function then calls:
+   
+```javascript
+    swapExactOutput(i_poolToken, 
+                    i_wethToken,
+                    10, //outputAmount argument
+                    uint64(block.timestamp));
+```
+
+4. This function calls _swap:
+
+```javascript
+    _swap(inputToken,   // i_poolToken
+          inputAmount,  // Calculated amount of input tokens, not the 10 USDC the user wanted to input
+          outputToken,  // i_wethToken
+          10);          // Weth user receives
+```
+
+If the price of 1 WETH is 1000 USDC, the user is required to send ~10,000 USDC instead of the 10 they requested to sell.
+
+**Recommended Mitigation**
+
+```diff
+    function sellPoolTokens(
+        uint256 poolTokenAmount,
++       uint256 minWethToReceive,    
+        ) external returns (uint256 wethAmount) {
+-        return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
++        return swapExactInput(i_poolToken, poolTokenAmount, i_wethToken, minWethToReceive, uint64(block.timestamp));
+    }
+```
+
+
+
+### [H-5] In `TSwapPool::_swap` the extra tokens given to users after every `swapCount` breaks the protocol invarian of `x * y = k`
+
+**Description** The protocol follows a strict invariant of `x * y = k` where `x` is the balance of the pool token, `y` is the balance of weth, and `k` is the constant product of the two balances.
+
+This means whenever the balances change in the protocol, the ratio between the two amounts should remain coknstant, hence `k`. However, this is broken due to the extra incentive in the `_swap` function. Meaning that over time the protocol funds will be drained.
+
+
+```javascript
+        swap_count++;
+        if (swap_count >= SWAP_COUNT_MAX) {
+            swap_count = 0;
+@>          outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+        }
+
+```
+ 
+**Impact** The protocol's core invariant is broken. 
+
+A user could maliciously drain the protocol of funds by doing lots of swaps and collecting the extra incentives given out by the protocol.
+
+
+**Proof of Concept** 
+
+```javascript
+    function testInvariantBroken() public {
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
+        vm.stopPrank();
+
+        uint256 outputWeth = 1e17;
+
+        vm.startPrank(user);
+        poolToken.approve(address(pool), type(uint256).max);
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+
+        int256 startingY = int256(weth.balanceOf(address(pool)));
+        int256 expectedDeltaY = int256(-1) * int256(outputWeth);
+
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        vm.stopPrank();
+
+        uint256 endingY = weth.balanceOf(address(pool));
+        int256 actualDeltaY = int256(endingY) - int256(startingY);
+        assertEq(actualDeltaY, expectedDeltaY);
+    }
+
+```
+
+**Recommended Mitigation**
+
+Remove the added incentive in the `TSwapPools::_swap` function.
+
+```diff
+-       if (swap_count >= SWAP_COUNT_MAX) {
+-           swap_count = 0;
+-           //@report-written magic numbers
+-           outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+-       }
+```
+
 
 ## Medium
 
@@ -190,8 +298,9 @@ function deposit(
         returns (uint256 liquidityTokensToMint)
 ```
 
+### [M-2] Rebase, fee-on-transfer, and ERC777 tokens break protocol invariant 
 
-
+Todo
 
 ## Low
 
